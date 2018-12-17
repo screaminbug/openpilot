@@ -27,6 +27,7 @@ def get_supported_pids():
       break
   return ret
 
+
 if __name__ == "__main__":
   panda = Panda()
   panda.set_safety_mode(Panda.SAFETY_ELM327)

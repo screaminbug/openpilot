@@ -1,0 +1,95 @@
+VERSION ""
+
+
+NS_ :
+    NS_DESC_
+    CM_
+    BA_DEF_
+    BA_
+    VAL_
+    CAT_DEF_
+    CAT_
+    FILTER
+    BA_DEF_DEF_
+    EV_DATA_
+    ENVVAR_DATA_
+    SGTYPE_
+    SGTYPE_VAL_
+    BA_DEF_SGTYPE_
+    BA_SGTYPE_
+    SIG_TYPE_REF_
+    VAL_TABLE_
+    SIG_GROUP_
+    SIG_VALTYPE_
+    SIGTYPE_VALTYPE_
+    BO_TX_BU_
+    BA_DEF_REL_
+    BA_REL_
+    BA_DEF_DEF_REL_
+    BU_SG_REL_
+    BU_EV_REL_
+    BU_BO_REL_
+    SG_MUL_VAL_
+
+BS_:
+
+BU_: XXX
+
+
+BO_ 276 NEW_MSG_1: 8 XXX
+
+BO_ 292 NEW_MSG_2: 8 XXX
+ SG_ RPM : 15|16@0+ (1,0) [0|6000] "" XXX
+
+BO_ 288 NEW_MSG_3: 8 XXX
+
+BO_ 290 NEW_MSG_4: 8 XXX
+ SG_ Gas : 15|16@0+ (1,0) [0|65535] "" XXX
+
+BO_ 440 NEW_MSG_5: 8 XXX
+ SG_ wheel_rear_right : 23|16@0+ (1,0) [0|511] "" XXX
+ SG_ wheel_spd_front_left : 55|16@0+ (1,0) [0|65535] "" XXX
+ SG_ wheel_spd_rear_left : 7|16@0+ (1,0) [0|65535] "" XXX
+ SG_ wheel_spd_front_right : 39|16@0+ (1,0) [0|65535] "" XXX
+
+BO_ 319 NEW_MSG_6: 8 XXX
+ SG_ rpm : 15|16@0+ (1,0) [0|65535] "" XXX
+
+BO_ 495 Steering: 8 XXX
+ SG_ steer_torque : 15|16@0+ (1,0) [0|65535] "" XXX
+ SG_ NEW_SIGNAL_2 : 31|16@0+ (1,0) [0|255] "" XXX
+ SG_ NEW_SIGNAL_3 : 47|16@0+ (1,0) [0|65535] "" XXX
+ SG_ NEW_SIGNAL_1 : 56|5@1- (1,0) [0|31] "" XXX
+
+BO_ 672 NEW_MSG_8: 8 XXX
+ SG_ NEW_SIGNAL_1 : 3|12@0+ (1,0) [0|255] "" XXX
+
+BO_ 788 NEW_MSG_9: 8 XXX
+ SG_ NEW_SIGNAL_1 : 31|16@0+ (1,0) [0|65535] "" XXX
+ SG_ speed : 15|16@0+ (1,0) [0|65535] "" XXX
+ SG_ NEW_SIGNAL_2 : 47|16@0+ (1,0) [0|65535] "" XXX
+
+BO_ 953 NEW_MSG_10: 8 XXX
+ SG_ NEW_SIGNAL_2 : 39|8@0+ (1,0) [0|255] "" XXX
+ SG_ NEW_SIGNAL_1 : 15|8@0+ (1,0) [0|255] "" XXX
+
+BO_ 431 NEW_MSG_7: 8 XXX
+
+BO_ 976 LIGHTS: 8 XXX
+ SG_ BLINKER_LEFT : 38|1@0+ (1,0) [0|1] "" XXX
+ SG_ BLINKER_RIGHT : 39|1@0+ (1,0) [0|1] "" XXX
+ SG_ PARKING_BRAKE : 14|1@0+ (1,0) [0|1] "" XXX
+
+BO_ 977 NEW_MSG_11: 8 XXX
+ SG_ DOOR_LEFT : 0|1@1+ (1,0) [0|3] "" XXX
+ SG_ NEW_SIGNAL_1 : 55|16@0+ (1,0) [0|255] "" XXX
+
+BO_ 792 NEW_MSG_12: 8 XXX
+ SG_ NEW_SIGNAL_1 : 39|8@0- (1,0) [0|65535] "" XXX
+
+BO_ 429 NEW_MSG_13: 8 XXX
+ SG_ NEW_SIGNAL_1 : 39|4@0+ (1,0) [0|15] "" XXX
+
+BO_ 281 NEW_MSG_14: 8 XXX
+ SG_ NEW_SIGNAL_1 : 47|8@0+ (1,0) [0|255] "" XXX
+ SG_ NEW_SIGNAL_2 : 31|16@0+ (1,0) [0|65535] "" XXX
