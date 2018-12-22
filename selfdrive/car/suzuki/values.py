@@ -12,7 +12,7 @@ FINGERPRINTS = {
 STEER_THRESHOLD = 100
 
 DBC = {
-  CAR.SWIFT: dbc_dict('suzuki_swift_2013_pt_generated', 'suzuki_swift_2013_adas'),
+  CAR.SWIFT: dbc_dict('suzuki_swift_2013', None),
 }
 
 NO_DSU_CAR = []
