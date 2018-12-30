@@ -6,6 +6,11 @@ from selfdrive.services import service_list
 from selfdrive.swaglog import cloudlog
 import selfdrive.messaging as messaging
 
+try:
+  from selfdrive.car.suzuki import CarController
+except ImportError:
+  CarController = None
+
 # mocked car interface to work with chffrplus
 TS = 0.01  # 100Hz
 YAW_FR = 0.2 # ~0.8s time constant on yaw rate filter
