@@ -57,10 +57,10 @@ def create_gas_command(packer, gas_amount, idx):
   return packer.make_can_msg("GAS_COMMAND", 0, values, idx)
 
 
-def create_steering_control(packer, canbus, apply_steer, car_fingerprint, idx):
+def create_steering_control(packer, canbus, apply_steer, idx):
   values = {
-    "STEER_TORQUE_1": apply_steer,
-    "STEER_TORQUE_2": apply_steer + 0x18,
+    "STEER_ANGLE_1": apply_steer,
+    "STEER_ANGLE_2": apply_steer + 0x18,
     "CONST_1_LSB": 1,
     "CONST_1_MSB": 1,
     "COUNTER": idx,
