@@ -5,11 +5,12 @@ from selfdrive.config import Conversions as CV
 from selfdrive.services import service_list
 from selfdrive.swaglog import cloudlog
 import selfdrive.messaging as messaging
+from selfdrive.car.suzuki.carstate import CarState, get_can_parser
 
 try:
-  from selfdrive.car.suzuki import CarController
+  from selfdrive.car.suzuki.carcontroller import CarController
 except ImportError:
-  CarController = None
+  CarController = None  # type: None
 
 # mocked car interface to work with chffrplus
 TS = 0.01  # 100Hz
@@ -23,8 +24,17 @@ class CarInterface(object):
 
     self.CP = CP
 
+    self.carParams = get_can_parser(CP)
+    self.frame = 0
+
+    self.CS = CarState(CP)
+
     cloudlog.debug("Using Mock Car Interface")
     context = zmq.Context()
+    # sending if read only is False
+    if sendcan is not None:
+      self.sendcan = sendcan
+      self.CC = CarController(self.carParams.dbc_name, CP.enableCamera, self.VM)
 
     # TODO: subscribe to phone sensor
     self.sensor = messaging.sub_sock(context, service_list['sensorEvents'].port)
@@ -48,10 +58,10 @@ class CarInterface(object):
 
     ret = car.CarParams.new_message()
 
-    ret.carName = "mock"
+    ret.carName = "SUZUKI SWIFT"
     ret.carFingerprint = candidate
 
-    ret.safetyModel = car.CarParams.SafetyModels.noOutput
+    ret.safetyModel = car.CarParams.SafetyModels.suzuki
 
     # FIXME: hardcoding honda civic 2016 touring params so they can be used to
     # scale unknown params for other cars
@@ -83,6 +93,8 @@ class CarInterface(object):
 
   # returns a car.CarState
   def update(self, c):
+
+    self.CS.update(self.carParams)
 
     # get basic data from phone and gps since CAN isn't connected
     sensors = messaging.recv_sock(self.sensor)
@@ -124,4 +136,8 @@ class CarInterface(object):
 
   def apply(self, c, perception_state=log.Live20Data.new_message()):
     # in mock no carcontrols
+    self.CC.update(self.sendcan, c.enabled, self.CS, self.frame, c.actuators)
+
+    self.frame += 1
+
     return False

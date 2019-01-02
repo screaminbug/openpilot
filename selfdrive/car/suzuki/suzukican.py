@@ -18,6 +18,10 @@ def fix(msg, addr):
   msg2 = msg[0:-1] + chr(ord(msg[-1]) | can_cksum(struct.pack("I", addr)+msg))
   return msg2
 
+def calc_checksum(steer, idx):
+  # TODO: calculate 4-bit checksum
+  return 0
+
 
 def create_brake_command(packer, apply_brake, pump_on, pcm_override, pcm_cancel_cmd, chime, fcw, idx):
   # TODO: do we loose pressure if we keep pump off for long?
@@ -56,9 +60,14 @@ def create_gas_command(packer, gas_amount, idx):
 def create_steering_control(packer, canbus, apply_steer, car_fingerprint, idx):
   values = {
     "STEER_TORQUE_1": apply_steer,
+    "STEER_TORQUE_2": apply_steer + 0x18,
+    "CONST_1_LSB": 1,
+    "CONST_1_MSB": 1,
+    "COUNTER": idx,
+    "CHECKSUM": calc_checksum(apply_steer, idx)
   }
 
-  return packer.make_can_msg("STEER_CONTROL", canbus, values, idx)
+  return packer.make_can_msg("STEER_INPUT", canbus, values, idx)
 
 
 def create_ui_commands(packer, pcm_speed, hud, car_fingerprint, idx):

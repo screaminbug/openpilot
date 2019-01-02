@@ -108,6 +108,7 @@ typedef struct {
 #define SAFETY_ALLOUTPUT 0x1337
 #define SAFETY_ELM327 0xE327
 #define SAFETY_FORWARD 0xFA0D
+#define SAFETY_SUZUKI 0x535A
 
 const safety_hook_config safety_hook_registry[] = {
   {SAFETY_NOOUTPUT, &nooutput_hooks},
@@ -125,6 +126,7 @@ const safety_hook_config safety_hook_registry[] = {
   {SAFETY_ALLOUTPUT, &alloutput_hooks},
   {SAFETY_ELM327, &elm327_hooks},
   {SAFETY_FORWARD, &forward_hooks},
+  {SAFETY_SUZUKI, &suzuki_hooks},
 };
 
 #define HOOK_CONFIG_COUNT (sizeof(safety_hook_registry)/sizeof(safety_hook_config))

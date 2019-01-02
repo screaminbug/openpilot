@@ -14,16 +14,12 @@ def get_can_parser(CP):
     ("WHEEL_REAR_LEFT", "WHEEL_SPEEDS", 0.),
     ("WHEEL_FRONT_RIGHT", "WHEEL_SPEEDS", 0.),
     ("WHEEL_FRONT_LEFT", "WHEEL_SPEEDS", 0.),
-    ("STEER_SMOOTH_1", "STEER_INPUT", 0.),
-   # ("Cruise_State", "Cruise_Status", 0.),
-   # ("Set_Speed", "Cruise_Status", 0.),
-   # ("LaActAvail_D_Actl", "Lane_Keep_Assist_Status", 0),
-   # ("LaHandsOff_B_Actl", "Lane_Keep_Assist_Status", 0),
-   # ("LaActDeny_B_Actl", "Lane_Keep_Assist_Status", 0),
+    ("STEER_ANGLE_1", "STEER_INPUT", 0.),
+    ("STEER_ANGLE_2", "STEER_INPUT", 0.),
+    ("CHECKSUM", "STEER_INPUT", 0.),
+    ("COUNTER", "STEER_INPUT", 0.),
     ("GAS_1", "ENGINE_CONTROL", 0.),
-   # ("Dist_Incr", "Steering_Buttons", 0.),
-   # ("Brake_Drv_Appl", "Cruise_Status", 0.),
-   # ("Brake_Lights", "BCM_to_HS_Body", 0.),
+
   ]
 
   checks = [
@@ -77,7 +73,7 @@ class CarState(object):
     self.a_ego = float(v_ego_x[1])
     self.standstill = not self.v_wheel > 0.001
 
-    self.angle_steers = cp.vl["STEER_INPUT"]['STEER_SMOOTH_1']
+    self.angle_steers = cp.vl["STEER_INPUT"]['STEER_ANGLE_1']
     self.v_cruise_pcm = 0 #cp.vl["Cruise_Status"]['Set_Speed'] * CV.MPH_TO_MS
     self.pcm_acc_status = 0 #cp.vl["Cruise_Status"]['Cruise_State']
     self.main_on = 0 #cp.vl["Cruise_Status"]['Cruise_State'] != 0

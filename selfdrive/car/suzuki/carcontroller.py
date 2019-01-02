@@ -8,8 +8,8 @@ from selfdrive.car.suzuki.values import CAR, DBC
 class CarControllerParams:
   def __init__(self, car_fingerprint):
     if car_fingerprint == CAR.SWIFT:
-      self.STEER_MAX = 300
-      self.STEER_STEP = 2              # how often we update the steer cmd
+      self.STEER_MAX = 1100
+      self.STEER_STEP = 1              # how often we update the steer cmd
       self.STEER_DELTA_UP = 7          # ~0.75s time to peak torque (255/50hz/0.75s)
       self.STEER_DELTA_DOWN = 17       # ~0.3s from peak torque to zero
 
@@ -41,21 +41,18 @@ class CarController(object):
 
     # Send CAN commands.
     can_sends = []
-    canbus = self.canbus
+
+    apply_steer = 0
 
     if (frame % P.STEER_STEP) == 0:
-      lkas_enabled = enabled and not CS.steer_not_allowed and CS.v_ego > 3.
-      if lkas_enabled:
-        apply_steer = actuators.steer * P.STEER_MAX
-        apply_steer = apply_std_steer_torque_limits(apply_steer, self.apply_steer_last, CS.steer_torque_driver, P)
-      else:
-        apply_steer = 0
+      if enabled and not CS.steer_not_allowed:
+        apply_steer = actuators.steer * P.STEER_MAX + (P.STEER_MAX / 2)
 
       self.apply_steer_last = apply_steer
       idx = (frame / P.STEER_STEP) % 4
 
       can_sends.append(suzukican.create_steering_control(self.packer_pt,
-        canbus.powertrain, apply_steer, idx))
+        self.canbus, apply_steer, idx))
 
     sendcan.send(can_list_to_can_capnp(can_sends, msgtype='sendcan').to_bytes())
 
