@@ -1,0 +1,9 @@
+[submodule "panda"]
+	path = panda
+	url = git@github.com:screaminbug/panda.git
+[submodule "openpilot-tools"]
+	path = openpilot-tools
+	url = git@github.com:screaminbug/openpilot-tools.git
+[submodule "opendbc"]
+	path = opendbc
+	url = git@github.com:screaminbug/opendbc.git
