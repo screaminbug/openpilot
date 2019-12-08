@@ -7,7 +7,7 @@ from selfdrive.car.honda.hondacan import fix
 from common.realtime import sec_since_boot
 from common.dbc import dbc
 
-class CANParser(object):
+class CANParser():
   def __init__(self, dbc_f, signals, checks=None):
     ### input:
     # dbc_f   : dbc file
@@ -21,7 +21,7 @@ class CANParser(object):
     #             - frequency is the frequency at which health should be monitored.
 
     checks = [] if checks is None else checks
-    self.msgs_ck = set([check[0] for check in checks])
+    self.msgs_ck = {check[0] for check in checks}
     self.frqs = dict(checks)
     self.can_valid = False  # start with False CAN assumption
     # list of received msg we want to monitor counter and checksum for
@@ -73,12 +73,12 @@ class CANParser(object):
         self.ck[msg] = True
         if "CHECKSUM" in out.keys() and msg in self.msgs_ck:
           # remove checksum (half byte)
-          ck_portion = cdat[:-1] + chr(ord(cdat[-1]) & 0xF0)
+          ck_portion = cdat[:-1] + (cdat[-1] & 0xF0).to_bytes(1, 'little')
           # recalculate checksum
           msg_vl = fix(ck_portion, msg)
           # compare recalculated vs received checksum
           if msg_vl != cdat:
-            print "CHECKSUM FAIL: " + hex(msg)
+            print("CHECKSUM FAIL: {0}".format(hex(msg)))
             self.ck[msg] = False
             self.ok[msg] = False
         # counter check
@@ -87,13 +87,13 @@ class CANParser(object):
           cn = out["COUNTER"]
         # check counter validity if it's a relevant message
         if cn != ((self.cn[msg] + 1) % 4) and msg in self.msgs_ck and "COUNTER" in out.keys():
-          #print hex(msg), "FAILED COUNTER!"
+          #print("FAILED COUNTER: {0}".format(hex(msg)()
           self.cn_vl[msg] += 1   # counter check failed
         else:
           self.cn_vl[msg] -= 1   # counter check passed
         # message status is invalid if we received too many wrong counter values
         if self.cn_vl[msg] >= cn_vl_max:
-          print "COUNTER WRONG: " + hex(msg)
+          print("COUNTER WRONG: {0}".format(hex(msg)))
           self.ok[msg] = False
 
         # update msg time stamps and counter value
@@ -118,7 +118,7 @@ class CANParser(object):
     self.can_valid = True
 
     if False in self.ok.values():
-      #print "CAN INVALID!"
+      #print("CAN INVALID!")
       self.can_valid = False
 
     return msgs_upd

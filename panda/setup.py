@@ -13,7 +13,7 @@
 import codecs
 import os
 import re
-from setuptools import setup, Extension
+from setuptools import setup
 
 here = os.path.abspath(os.path.dirname(__file__))
 
@@ -46,7 +46,7 @@ setup(
   platforms='any',
   license='MIT',
   install_requires=[
-    'libusb1 >= 1.6.4',
+    'libusb1 == 1.6.6',
     'hexdump >= 3.3',
     'pycrypto >= 2.6.1',
     'tqdm >= 4.14.0',

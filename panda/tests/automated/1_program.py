@@ -1,11 +1,11 @@
-import os
-from panda import Panda
+from .helpers import test_all_pandas, panda_connect_and_init
 
-def test_recover():
-  p = Panda()
-  p.recover()
+@test_all_pandas
+@panda_connect_and_init
+def test_recover(p):
+  assert p.recover(timeout=30)
 
-def test_flash():
-  p = Panda()
+@test_all_pandas
+@panda_connect_and_init
+def test_flash(p):
   p.flash()
-

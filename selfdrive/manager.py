@@ -1,10 +1,13 @@
-#!/usr/bin/env python2.7
+#!/usr/bin/env python3.7
 import os
+import time
 import sys
 import fcntl
 import errno
 import signal
 import subprocess
+import datetime
+from common.spinner import Spinner
 
 from common.basedir import BASEDIR
 sys.path.append(os.path.join(BASEDIR, "pyextra"))
@@ -34,48 +37,28 @@ def unblock_stdout():
         break
 
       try:
-        sys.stdout.write(dat)
+        sys.stdout.write(dat.decode('utf8'))
       except (OSError, IOError):
         pass
 
     os._exit(os.wait()[1])
 
 if __name__ == "__main__":
-  neos_update_required = os.path.isfile("/init.qcom.rc") \
-    and (not os.path.isfile("/VERSION") or int(open("/VERSION").read()) < 8)
-  if neos_update_required:
-    # update continue.sh before updating NEOS
-    if os.path.isfile(os.path.join(BASEDIR, "scripts", "continue.sh")):
-      from shutil import copyfile
-      copyfile(os.path.join(BASEDIR, "scripts", "continue.sh"), "/data/data/com.termux/files/continue.sh")
-
-    # run the updater
-    print("Starting NEOS updater")
-    subprocess.check_call(["git", "clean", "-xdf"], cwd=BASEDIR)
-    os.system(os.path.join(BASEDIR, "installer", "updater", "updater"))
-    raise Exception("NEOS outdated")
-  elif os.path.isdir("/data/neoupdate"):
-    from shutil import rmtree
-    rmtree("/data/neoupdate")
-
   unblock_stdout()
 
 import glob
 import shutil
 import hashlib
 import importlib
-import subprocess
 import traceback
 from multiprocessing import Process
 
-import zmq
 from setproctitle import setproctitle  #pylint: disable=no-name-in-module
 
 from common.params import Params
 import cereal
 ThermalStatus = cereal.log.ThermalData.ThermalStatus
 
-from selfdrive.services import service_list
 from selfdrive.swaglog import cloudlog
 import selfdrive.messaging as messaging
 from selfdrive.registration import register
@@ -88,10 +71,11 @@ from selfdrive.loggerd.config import ROOT
 managed_processes = {
   "thermald": "selfdrive.thermald",
   "uploader": "selfdrive.loggerd.uploader",
+  "deleter": "selfdrive.loggerd.deleter",
   "controlsd": "selfdrive.controls.controlsd",
+  "plannerd": "selfdrive.controls.plannerd",
   "radard": "selfdrive.controls.radard",
-  "ubloxd": "selfdrive.locationd.ubloxd",
-  "mapd": "selfdrive.mapd.mapd",
+  "ubloxd": ("selfdrive/locationd", ["./ubloxd"]),
   "loggerd": ("selfdrive/loggerd", ["./loggerd"]),
   "logmessaged": "selfdrive.logmessaged",
   "tombstoned": "selfdrive.tombstoned",
@@ -99,13 +83,16 @@ managed_processes = {
   "proclogd": ("selfdrive/proclogd", ["./proclogd"]),
   "boardd": ("selfdrive/boardd", ["./boardd"]),   # not used directly
   "pandad": "selfdrive.pandad",
-  "ui": ("selfdrive/ui", ["./start.sh"]),
+  "ui": ("selfdrive/ui", ["./start.py"]),
   "calibrationd": "selfdrive.locationd.calibrationd",
-  "visiond": ("selfdrive/visiond", ["./visiond"]),
-  "sensord": ("selfdrive/sensord", ["./sensord"]),
-  "gpsd": ("selfdrive/sensord", ["./gpsd"]),
-  "orbd": ("selfdrive/orbd", ["./orbd_wrapper.sh"]),
+  "paramsd": ("selfdrive/locationd", ["./paramsd"]),
+  "visiond": ("selfdrive/visiond", ["./start.py"]),
+  "sensord": ("selfdrive/sensord", ["./start_sensord.py"]),
+  "gpsd": ("selfdrive/sensord", ["./start_gpsd.py"]),
   "updated": "selfdrive.updated",
+}
+daemon_processes = {
+  "manage_athenad": ("selfdrive.athena.manage_athenad", "AthenadPid"),
 }
 android_packages = ("ai.comma.plus.offroad", "ai.comma.plus.frame")
 
@@ -119,6 +106,9 @@ unkillable_processes = ['visiond']
 # processes to end with SIGINT instead of SIGTERM
 interrupt_processes = []
 
+# processes to end with SIGKILL instead of SIGTERM
+kill_processes = ['sensord', 'paramsd']
+
 persistent_processes = [
   'thermald',
   'logmessaged',
@@ -126,21 +116,22 @@ persistent_processes = [
   'tombstoned',
   'uploader',
   'ui',
-  'gpsd',
   'updated',
 ]
 
 car_started_processes = [
   'controlsd',
+  'plannerd',
   'loggerd',
   'sensord',
   'radard',
   'calibrationd',
+  'paramsd',
   'visiond',
   'proclogd',
   'ubloxd',
-  'orbd',
-  'mapd',
+  'gpsd',
+  'deleter',
 ]
 
 def register_managed_process(name, desc, car_started=False):
@@ -153,7 +144,7 @@ def register_managed_process(name, desc, car_started=False):
     persistent_processes.append(name)
 
 # ****************** process management functions ******************
-def launcher(proc, gctx):
+def launcher(proc):
   try:
     # import the process
     mod = importlib.import_module(proc)
@@ -161,8 +152,11 @@ def launcher(proc, gctx):
     # rename the process
     setproctitle(proc)
 
+    # create now context since we forked
+    messaging.context = messaging.Context()
+
     # exec the process
-    mod.main(gctx)
+    mod.main()
   except KeyboardInterrupt:
     cloudlog.warning("child %s got SIGINT" % proc)
   except Exception:
@@ -186,13 +180,35 @@ def start_managed_process(name):
   proc = managed_processes[name]
   if isinstance(proc, str):
     cloudlog.info("starting python %s" % proc)
-    running[name] = Process(name=name, target=launcher, args=(proc, gctx))
+    running[name] = Process(name=name, target=launcher, args=(proc,))
   else:
     pdir, pargs = proc
     cwd = os.path.join(BASEDIR, pdir)
     cloudlog.info("starting process %s" % name)
     running[name] = Process(name=name, target=nativelauncher, args=(pargs, cwd))
   running[name].start()
+
+def start_daemon_process(name, params):
+  proc, pid_param = daemon_processes[name]
+  pid = params.get(pid_param)
+
+  if pid is not None:
+    try:
+      os.kill(int(pid), 0)
+      # process is running (kill is a poorly-named system call)
+      return
+    except OSError:
+      # process is dead
+      pass
+
+  cloudlog.info("starting daemon %s" % name)
+  proc = subprocess.Popen(['python', '-m', proc],
+                         cwd='/',
+                         stdout=open('/dev/null', 'w'),
+                         stderr=open('/dev/null', 'w'),
+                         preexec_fn=os.setpgrp)
+
+  params.put(pid_param, str(proc.pid))
 
 def prepare_managed_process(p):
   proc = managed_processes[p]
@@ -219,11 +235,19 @@ def kill_managed_process(name):
   if running[name].exitcode is None:
     if name in interrupt_processes:
       os.kill(running[name].pid, signal.SIGINT)
+    elif name in kill_processes:
+      os.kill(running[name].pid, signal.SIGKILL)
     else:
       running[name].terminate()
 
-    # give it 5 seconds to die
-    running[name].join(5.0)
+    # Process().join(timeout) will hang due to a python 3 bug: https://bugs.python.org/issue28382
+    # We have to poll the exitcode instead
+    # running[name].join(5.0)
+
+    t = time.time()
+    while time.time() - t < 5 and running[name].exitcode is None:
+      time.sleep(0.001)
+
     if running[name].exitcode is None:
       if name in unkillable_processes:
         cloudlog.critical("unkillable process %s failed to exit! rebooting in 15 if it doesn't die" % name)
@@ -258,8 +282,6 @@ def cleanup_all_processes(signal, frame):
 # ****************** run loop ******************
 
 def manager_init(should_register=True):
-  global gctx
-
   if should_register:
     reg_res = register()
     if reg_res:
@@ -287,9 +309,6 @@ def manager_init(should_register=True):
   except OSError:
     pass
 
-  # set gctx
-  gctx = {}
-
 def system(cmd):
   try:
     cloudlog.info("running %s" % cmd)
@@ -303,8 +322,7 @@ def system(cmd):
 
 def manager_thread():
   # now loop
-  context = zmq.Context()
-  thermal_sock = messaging.sub_sock(context, service_list['thermal'].port)
+  thermal_sock = messaging.sub_sock('thermal')
 
   cloudlog.info("manager start")
   cloudlog.info({"environ": os.environ})
@@ -312,21 +330,27 @@ def manager_thread():
   # save boot log
   subprocess.call(["./loggerd", "--bootlog"], cwd=os.path.join(BASEDIR, "selfdrive/loggerd"))
 
+  params = Params()
+
+  # start daemon processes
+  for p in daemon_processes:
+    start_daemon_process(p, params)
+
+  # start persistent processes
   for p in persistent_processes:
     start_managed_process(p)
 
   # start frame
   pm_apply_packages('enable')
+  system("LD_LIBRARY_PATH= appops set ai.comma.plus.offroad SU allow")
   system("am start -n ai.comma.plus.frame/.MainActivity")
 
   if os.getenv("NOBOARD") is None:
     start_managed_process("pandad")
 
-  params = Params()
   logger_dead = False
 
   while 1:
-    # get health of board, log this in "thermal"
     msg = messaging.recv_sock(thermal_sock, wait=True)
 
     # uploader is gated based on the phone temperature
@@ -350,15 +374,15 @@ def manager_thread():
         kill_managed_process(p)
 
     # check the status of all processes, did any of them die?
-    for p in running:
-      cloudlog.debug("   running %s %s" % (p, running[p]))
+    running_list = ["   running %s %s" % (p, running[p]) for p in running]
+    cloudlog.debug('\n'.join(running_list))
 
-    # is this still needed?
-    if params.get("DoUninstall") == "1":
+    # Exit main loop when uninstall is needed
+    if params.get("DoUninstall", encoding='utf8') == "1":
       break
 
 def get_installed_apks():
-  dat = subprocess.check_output(["pm", "list", "packages", "-f"]).strip().split("\n")
+  dat = subprocess.check_output(["pm", "list", "packages", "-f"], encoding='utf8').strip().split("\n")  # pylint: disable=unexpected-keyword-arg
   ret = {}
   for x in dat:
     if x.startswith("package:"):
@@ -387,16 +411,16 @@ def update_apks():
 
   cloudlog.info("installed apks %s" % (str(installed), ))
 
-  for app in installed.iterkeys():
+  for app in installed.keys():
 
     apk_path = os.path.join(BASEDIR, "apk/"+app+".apk")
     if not os.path.exists(apk_path):
       continue
 
-    h1 = hashlib.sha1(open(apk_path).read()).hexdigest()
+    h1 = hashlib.sha1(open(apk_path, 'rb').read()).hexdigest()
     h2 = None
     if installed[app] is not None:
-      h2 = hashlib.sha1(open(installed[app]).read()).hexdigest()
+      h2 = hashlib.sha1(open(installed[app], 'rb').read()).hexdigest()
       cloudlog.info("comparing version of %s  %s vs %s" % (app, h1, h2))
 
     if h2 is None or h1 != h2:
@@ -411,18 +435,23 @@ def update_apks():
       assert success
 
 def manager_update():
-  if os.path.exists(os.path.join(BASEDIR, "vpn")):
-    cloudlog.info("installing vpn")
-    os.system(os.path.join(BASEDIR, "vpn", "install.sh"))
   update_apks()
 
-def manager_prepare():
+  uninstall = [app for app in get_installed_apks().keys() if app in ("com.spotify.music", "com.waze")]
+  for app in uninstall:
+    cloudlog.info("uninstalling %s" % app)
+    os.system("pm uninstall % s" % app)
+
+def manager_prepare(spinner=None):
   # build cereal first
   subprocess.check_call(["make", "-j4"], cwd=os.path.join(BASEDIR, "cereal"))
 
   # build all processes
   os.chdir(os.path.dirname(os.path.abspath(__file__)))
-  for p in managed_processes:
+
+  for i, p in enumerate(managed_processes):
+    if spinner is not None:
+      spinner.update("%d" % (100.0 * (i + 1) / len(managed_processes),))
     prepare_managed_process(p)
 
 def uninstall():
@@ -435,6 +464,9 @@ def uninstall():
 def main():
   # the flippening!
   os.system('LD_LIBRARY_PATH="" content insert --uri content://settings/system --bind name:s:user_rotation --bind value:i:1')
+
+  # disable bluetooth
+  os.system('service call bluetooth_manager 8')
 
   if os.getenv("NOLOG") is not None:
     del managed_processes['loggerd']
@@ -452,12 +484,13 @@ def main():
     del managed_processes['proclogd']
   if os.getenv("NOCONTROL") is not None:
     del managed_processes['controlsd']
+    del managed_processes['plannerd']
     del managed_processes['radard']
 
   # support additional internal only extensions
   try:
     import selfdrive.manager_extensions
-    selfdrive.manager_extensions.register(register_managed_process)
+    selfdrive.manager_extensions.register(register_managed_process) # pylint: disable=no-member
   except ImportError:
     pass
 
@@ -465,18 +498,20 @@ def main():
   params.manager_start()
 
   # set unset params
+  if params.get("CompletedTrainingVersion") is None:
+    params.put("CompletedTrainingVersion", "0")
   if params.get("IsMetric") is None:
     params.put("IsMetric", "0")
   if params.get("RecordFront") is None:
     params.put("RecordFront", "0")
-  if params.get("IsFcwEnabled") is None:
-    params.put("IsFcwEnabled", "1")
   if params.get("HasAcceptedTerms") is None:
     params.put("HasAcceptedTerms", "0")
+  if params.get("HasCompletedSetup") is None:
+    params.put("HasCompletedSetup", "0")
+  if params.get("IsUploadRawEnabled") is None:
+    params.put("IsUploadRawEnabled", "1")
   if params.get("IsUploadVideoOverCellularEnabled") is None:
     params.put("IsUploadVideoOverCellularEnabled", "1")
-  if params.get("IsDriverMonitoringEnabled") is None:
-    params.put("IsDriverMonitoringEnabled", "1")
   if params.get("IsGeofenceEnabled") is None:
     params.put("IsGeofenceEnabled", "-1")
   if params.get("SpeedLimitOffset") is None:
@@ -485,6 +520,13 @@ def main():
     params.put("LongitudinalControl", "0")
   if params.get("LimitSetSpeed") is None:
     params.put("LimitSetSpeed", "0")
+  if params.get("LimitSetSpeedNeural") is None:
+    params.put("LimitSetSpeedNeural", "0")
+  if params.get("LastUpdateTime") is None:
+    t = datetime.datetime.now().isoformat()
+    params.put("LastUpdateTime", t.encode('utf8'))
+  if params.get("OpenpilotEnabledToggle") is None:
+    params.put("OpenpilotEnabledToggle", "1")
 
   # is this chffrplus?
   if os.getenv("PASSIVE") is not None:
@@ -493,21 +535,11 @@ def main():
   if params.get("Passive") is None:
     raise Exception("Passive must be set to continue")
 
-  # put something on screen while we set things up
-  if os.getenv("PREPAREONLY") is not None:
-    spinner_proc = None
-  else:
-    spinner_text = "chffrplus" if params.get("Passive")=="1" else "openpilot"
-    spinner_proc = subprocess.Popen(["./spinner", "loading %s"%spinner_text],
-      cwd=os.path.join(BASEDIR, "selfdrive", "ui", "spinner"),
-      close_fds=True)
-  try:
-    manager_update()
-    manager_init()
-    manager_prepare()
-  finally:
-    if spinner_proc:
-      spinner_proc.terminate()
+  with Spinner() as spinner:
+      spinner.update("0") # Show progress bar
+      manager_update()
+      manager_init()
+      manager_prepare(spinner)
 
   if os.getenv("PREPAREONLY") is not None:
     return
@@ -523,7 +555,7 @@ def main():
   finally:
     cleanup_all_processes(None, None)
 
-  if params.get("DoUninstall") == "1":
+  if params.get("DoUninstall", encoding='utf8') == "1":
     uninstall()
 
 if __name__ == "__main__":

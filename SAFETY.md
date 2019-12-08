@@ -1,8 +1,8 @@
 openpilot Safety
 ======
 
-openpilot is an Adaptive Cruise Control (ACC) and Lane Keeping Assist (LKA) system. 
-Like other ACC and LKA systems, openpilot requires the driver to be alert and to 
+openpilot is an Adaptive Cruise Control (ACC) and Automated Lane Centering (ALC) system. 
+Like other ACC and ALC systems, openpilot requires the driver to be alert and to 
 pay attention at all times. We repeat, **driver alertness is necessary, but not 
 sufficient, for openpilot to be used safely**.
 
@@ -89,11 +89,11 @@ GM/Chevrolet
     and openpilot to 350. This is approximately 0.3g of braking.
 
   - Steering torque is controlled through the 0x180 CAN message and it's limited by the panda firmware and by
-    openpilot to a value between -255 and 255. In addition, the vehicle EPS unit will not fault when
+    openpilot to a value between -300 and 300. In addition, the vehicle EPS unit will fault for
     commands outside these limits.  A steering torque rate limit is enforced by the panda firmware and by
     openpilot, so that the commanded steering torque must rise from 0 to max value no faster than
     0.75s. Commanded steering torque is gradually limited by the panda firmware and by openpilot if the driver's
-    torque exceeds 12 units in the opposite dicrection to ensure limited applied torque against the
+    torque exceeds 12 units in the opposite direction to ensure limited applied torque against the
     driver's will.
 
   - Brake pedal and gas pedal potentiometer signals are contained in the 0xF1 and 0x1A1 CAN messages,
@@ -105,5 +105,70 @@ GM/Chevrolet
   - GM CAN uses both a counter and a checksum to ensure integrity and prevent
     replay of the same message.
 
-**Extra note"**: comma.ai strongly discourages the use of openpilot forks with safety code either missing or
+Hyundai/Kia (Lateral only)
+------
+
+  - While the system is engaged, steer commands are subject to the same limits used by
+    the stock system.
+
+  - Steering torque is controlled through the 0x340 CAN message and it's limited by the panda firmware and by
+    openpilot to a value between -255 and 255. In addition, the vehicle EPS unit will fault for
+    commands outside the values of -409 and 409. A steering torque rate limit is enforced by the panda firmware and by
+    openpilot, so that the commanded steering torque must rise from 0 to max value no faster than
+    0.85s. Commanded steering torque is gradually limited by the panda firmware and by openpilot if the driver's
+    torque exceeds 50 units in the opposite direction to ensure limited applied torque against the
+    driver's will.
+
+Chrysler/Jeep/Fiat (Lateral only)
+------
+
+  - While the system is engaged, steer commands are subject to the same limits used by
+    the stock system.
+
+  - Steering torque is controlled through the 0x292 CAN message and it's limited by the panda firmware and by
+    openpilot to a value between -261 and 261. In addition, the vehicle EPS unit will fault for
+    commands outside these limits. A steering torque rate limit is enforced by the panda firmware and by
+    openpilot, so that the commanded steering torque must rise from 0 to max value no faster than
+    0.87s. Commanded steering torque is limited by the panda firmware and by openpilot to be no more than 80
+    units above the actual EPS generated motor torque to ensure limited differences between
+    commanded and actual torques.
+
+Subaru (Lateral only)
+------
+
+  - While the system is engaged, steer commands are subject to the same limits used by
+    the stock system.
+
+  - Steering torque is controlled through the 0x122 CAN message and it's limited by the panda firmware and by
+    openpilot to a value between -255 and 255. In addition, the vehicle EPS unit will fault for
+    commands outside the values of -2047 and 2047. A steering torque rate limit is enforced by the panda firmware and by
+    openpilot, so that the commanded steering torque must rise from 0 to max value no faster than
+    0.41s. Commanded steering torque is gradually limited by the panda firmware and by openpilot if the driver's
+    torque exceeds 60 units in the opposite direction to ensure limited applied torque against the
+    driver's will.
+
+Volkswagen, Audi, SEAT, Škoda (Lateral only)
+------
+
+  - While the system is engaged, steer commands are subject to the same limits used by the stock system, and
+    additional limits required to meet Comma safety standards.
+
+  - Steering torque is controlled through the CAN message 0x126, also known as HCA_01 for Heading Control Assist.
+    It's limited by openpilot and Panda to a value between -250 and 250, representing 2.5 Nm of torque applied 
+    at the steering rack. The vehicle EPS unit will fault for values outside -300 and 300.
+
+  - The vehicle EPS unit will tolerate any rate of increase or decrease, but may limit the effective rate of
+    change to 5.0 Nm/s. In accordance with the Comma AI safety model requirements, a rate limit is enforced by
+    the Panda firmware and by openpilot, so that the commanded steering torque cannot rise from 0 to maximum
+    faster than 1.25s. Commanded steering torque is gradually limited by the Panda firmware and by openpilot
+    if the driver's torque exceeds 0.8 Nm in the opposite direction to ensure limited applied torque against
+    the driver's will.
+
+  - Brake and gas pedal pressed signals are contained in the ESP_05 0x106 and Motor_20 0x121 CAN messages,
+    respectively. A rising edge of either signals triggers a disengagement and is enforced by openpilot.
+    The cancellation due to the rising edge of the gas pressed signal is also enforced by the Panda firmware. 
+    Additionally, the cruise control system disengages on the rising edge of the brake pedal pressed signal,
+    and it's enforced by both openpilot and the Panda firmware.
+
+**Extra note**: comma.ai strongly discourages the use of openpilot forks with safety code either missing or
   not fully meeting the above requirements.

@@ -16,30 +16,28 @@ WARN_FLAGS = -Werror=implicit-function-declaration \
 
 CFLAGS = -std=gnu11 -g -fPIC -O2 $(WARN_FLAGS)
 CXXFLAGS = -std=c++11 -g -fPIC -O2 $(WARN_FLAGS)
+LDFLAGS =
 
-ifeq ($(UNAME_S),Darwin)
-	ZMQ_LIBS = -L/usr/local/lib -lzmq
-else ifeq ($(OPTEST),1)
-	ZMQ_LIBS = -lzmq
-else ifeq ($(UNAME_M),x86_64)
-	EXTERNAL := ../../external
-	ZMQ_FLAGS = -I$(EXTERNAL)/zmq/include
-	ZMQ_LIBS = -L$(EXTERNAL)/zmq/lib -l:libzmq.a
-else ifeq ($(UNAME_M),aarch64)
-	ZMQ_FLAGS = -I$(PHONELIBS)/zmq/aarch64/include
-	ZMQ_LIBS = -L$(PHONELIBS)/zmq/aarch64/lib -l:libzmq.a
-	CXXFLAGS += -lgnustl_shared
+ifeq ($(ARCH),aarch64)
+CFLAGS += -mcpu=cortex-a57
+CXXFLAGS += -mcpu=cortex-a57
 endif
 
-OPENDBC_PATH := $(shell python -c 'import opendbc; print opendbc.DBC_PATH')
+OBJDIR = obj
 
-DBC_SOURCES := $(wildcard $(OPENDBC_PATH)/*.dbc)
+OPENDBC_PATH := $(shell python3 -c 'import opendbc; print(opendbc.DBC_PATH)')
+
+DBC_SOURCES := $(sort $(wildcard $(OPENDBC_PATH)/*.dbc))
+DBC_OBJS := $(patsubst $(OPENDBC_PATH)/%.dbc,$(OBJDIR)/%.o,$(DBC_SOURCES))
 DBC_CCS := $(patsubst $(OPENDBC_PATH)/%.dbc,dbc_out/%.cc,$(DBC_SOURCES))
+.SECONDARY: $(DBC_CCS)
+
+LIBDBC_OBJS := $(OBJDIR)/dbc.o $(OBJDIR)/parser.o $(OBJDIR)/packer.o $(OBJDIR)/common.o
 
 CWD := $(shell pwd)
 
 .PHONY: all
-all: libdbc.so
+all: $(OBJDIR) libdbc.so parser_pyx.so
 
 include ../common/cereal.mk
 
@@ -49,22 +47,51 @@ libdbc.so:: ../../cereal/gen/cpp/log.capnp.h
 ../../cereal/gen/cpp/log.capnp.h:
 	cd ../../cereal && make
 
-libdbc.so:: dbc.cc parser.cc packer.cc $(DBC_CCS)
+libdbc.so:: $(LIBDBC_OBJS) $(DBC_OBJS)
+	@echo "[ LINK ] $@"
 	$(CXX) -fPIC -shared -o '$@' $^ \
-	  -I. \
-	  -I../.. \
-    $(CXXFLAGS) \
-    $(ZMQ_FLAGS) \
-    $(ZMQ_LIBS) \
-    $(CEREAL_CXXFLAGS) \
-    $(CEREAL_LIBS)
+		-I. -I../.. \
+		$(CXXFLAGS) \
+		$(LDFLAGS) \
+		$(CEREAL_CXXFLAGS) \
+		$(CEREAL_LIBS)
 
-dbc_out/%.cc: $(OPENDBC_PATH)/%.dbc process_dbc.py dbc_template.cc
-	PYTHONPATH=$(PYTHONPATH):$(CWD)/../../pyextra ./process_dbc.py '$<' '$@'
+packer_impl.so: packer_impl.pyx packer_setup.py
+	python3 packer_setup.py build_ext --inplace
+	rm -rf build
+	rm -f packer_impl.cpp
 
-.PHONY: clean
+parser_pyx.so: libdbc.so parser_pyx_setup.py parser_pyx.pyx common.pxd
+	python3 parser_pyx_setup.py build_ext --inplace
+	rm -rf build
+	rm -f parser_pyx.cpp
+
+$(OBJDIR)/%.o: %.cc
+	@echo "[ CXX ] $@"
+	$(CXX) -fPIC -c -o '$@' $^ \
+		-I. -I../.. \
+		$(CXXFLAGS) \
+		$(CEREAL_CXXFLAGS) \
+
+$(OBJDIR)/%.o: dbc_out/%.cc
+	@echo "[ CXX ] $@"
+	$(CXX) -fPIC -c -o '$@' $^ \
+		-I. -I../.. \
+		$(CXXFLAGS) \
+		$(CEREAL_CXXFLAGS) \
+
+dbc_out/%.cc: process_dbc.py dbc_template.cc $(OPENDBC_PATH)/%.dbc
+	@echo "[ DBC GEN ] $@"
+	./process_dbc.py $(OPENDBC_PATH) '$@'
+
+$(OBJDIR):
+	mkdir -p $@
+
+.PHONY: clean $(OBJDIR)
 clean:
 	rm -rf libdbc.so*
 	rm -f dbc_out/*.cc
 	rm -f dbcs.txt
 	rm -f dbcs.csv
+	rm -f *.so
+	rm -rf $(OBJDIR)/*

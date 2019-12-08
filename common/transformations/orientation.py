@@ -29,7 +29,7 @@ def euler2quat(eulers):
        np.sin(gamma / 2) * np.sin(theta / 2) * np.cos(psi / 2)
 
   quats = array([q0, q1, q2, q3]).T
-  for i in xrange(len(quats)):
+  for i in range(len(quats)):
     if quats[i,0] < 0:
       quats[i] = -quats[i]
   return quats.reshape(output_shape)
@@ -99,7 +99,7 @@ def rot2quat(rots):
   K3[:, 3, 2] = K3[:, 2, 3]
   K3[:, 3, 3] = (rots[:, 0, 0] + rots[:, 1, 1] + rots[:, 2, 2]) / 3.0
   q = np.empty((len(rots), 4))
-  for i in xrange(len(rots)):
+  for i in range(len(rots)):
     _, eigvecs = linalg.eigh(K3[i].T)
     eigvecs = eigvecs[:,3:]
     q[i, 0] = eigvecs[-1]
@@ -221,6 +221,8 @@ def ned_euler_from_ecef(ned_ecef_init, ecef_poses):
   ecef_poses = array(ecef_poses)
   output_shape = ecef_poses.shape
   ned_ecef_init = np.atleast_2d(ned_ecef_init)
+  if ned_ecef_init.shape[0] == 1:
+    ned_ecef_init = np.tile(ned_ecef_init[0], (output_shape[0], 1))
   ecef_poses = np.atleast_2d(ecef_poses)
 
   ned_poses = np.zeros(ecef_poses.shape)
