@@ -1,258 +1,212 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
+'''
+This process finds calibration values. More info on what these calibration values
+are can be found here https://github.com/commaai/openpilot/tree/master/common/transformations
+While the roll calibration is a real value that can be estimated, here we assume it's zero,
+and the image input into the neural network is not corrected for roll.
+'''
+
 import os
-import zmq
-import cv2
 import copy
-import math
 import json
 import numpy as np
-import selfdrive.messaging as messaging
-from selfdrive.locationd.calibration_helpers import Calibration, Filter
+import cereal.messaging as messaging
+from selfdrive.config import Conversions as CV
 from selfdrive.swaglog import cloudlog
-from selfdrive.services import service_list
-from common.params import Params
-from common.ffi_wrapper import ffi_wrap
-import common.transformations.orientation as orient
-from common.transformations.model import model_height, get_camera_frame_from_model_frame, get_camera_frame_from_bigmodel_frame
-from common.transformations.camera import view_frame_from_device_frame, get_view_frame_from_road_frame, \
-                                          eon_intrinsics, get_calib_from_vp, normalize, denormalize, H, W
+from common.params import Params, put_nonblocking
+from common.transformations.model import model_height
+from common.transformations.camera import get_view_frame_from_road_frame
+from common.transformations.orientation import rot_from_euler, euler_from_rot
 
+MIN_SPEED_FILTER = 15 * CV.MPH_TO_MS
+MAX_VEL_ANGLE_STD = np.radians(0.25)
+MAX_YAW_RATE_FILTER = np.radians(2)  # per second
 
-MIN_SPEED_FILTER = 7 # m/s  (~15.5mph)
-MAX_YAW_RATE_FILTER = math.radians(3) # per second
-FRAMES_NEEDED = 120  # allow to update VP every so many frames
-VP_CYCLES_NEEDED = 2
-CALIBRATION_CYCLES_NEEDED = FRAMES_NEEDED * VP_CYCLES_NEEDED
-DT = 0.1      # nominal time step of 10Hz (orbd_live runs slower on pc)
-VP_RATE_LIM = 2. * DT    # 2 px/s
-VP_INIT = np.array([W/2., H/2.])
-EXTERNAL_PATH = os.path.dirname(os.path.abspath(__file__))
-# big model is 864x288
-VP_VALIDITY_CORNERS = np.array([[-150., -200.], [150., 200.]])  + VP_INIT
-GRID_WEIGHT_INIT = 2e6
-MAX_LINES = 500    # max lines to avoid over computation
-HOOD_HEIGHT = H*3/4 # the part of image usually free from the car's hood
+# This is at model frequency, blocks needed for efficiency
+SMOOTH_CYCLES = 400
+BLOCK_SIZE = 100
+INPUTS_NEEDED = 5   # Minimum blocks needed for valid calibration
+INPUTS_WANTED = 50   # We want a little bit more than we need for stability
+MAX_ALLOWED_SPREAD = np.radians(2)
+RPY_INIT = np.array([0.0,0.0,0.0])
 
+# These values are needed to accomodate biggest modelframe
+PITCH_LIMITS = np.array([-0.09074112085129739, 0.14907572052989657])
+YAW_LIMITS = np.array([-0.06912048084718224, 0.06912048084718235])
 DEBUG = os.getenv("DEBUG") is not None
 
-# Wrap c code for slow grid incrementation
-c_header = "\nvoid increment_grid(double *grid, double *lines, long long n);"
-c_code = "#define H %d\n" % H
-c_code += "#define W %d\n" % W
-c_code += "\n" + open(os.path.join(EXTERNAL_PATH, "get_vp.c")).read()
-ffi, lib = ffi_wrap('get_vp', c_code, c_header)
+
+class Calibration:
+  UNCALIBRATED = 0
+  CALIBRATED = 1
+  INVALID = 2
 
 
-def increment_grid_c(grid, lines, n):
-  lib.increment_grid(ffi.cast("double *", grid.ctypes.data),
-                ffi.cast("double *", lines.ctypes.data),
-                ffi.cast("long long", n))
+def is_calibration_valid(rpy):
+  return (PITCH_LIMITS[0] < rpy[1] < PITCH_LIMITS[1]) and (YAW_LIMITS[0] < rpy[2] < YAW_LIMITS[1])
 
-def get_lines(p):
-  A = (p[:,0,1] - p[:,1,1])
-  B = (p[:,1,0] - p[:,0,0])
-  C = (p[:,0,0]*p[:,1,1] - p[:,1,0]*p[:,0,1])
-  return np.column_stack((A, B, -C))
 
-def correct_pts(pts, rot_speeds, dt):
-  pts = np.hstack((pts, np.ones((pts.shape[0],1))))
-  cam_rot = dt * view_frame_from_device_frame.dot(rot_speeds)
-  rot = orient.rot_matrix(*cam_rot.T).T
-  pts_corrected = rot.dot(pts.T).T
-  pts_corrected[:,0] /= pts_corrected[:,2]
-  pts_corrected[:,1] /= pts_corrected[:,2]
-  return pts_corrected[:,:2]
+def sanity_clip(rpy):
+  if np.isnan(rpy).any():
+    rpy = RPY_INIT
+  return np.array([rpy[0],
+                   np.clip(rpy[1], PITCH_LIMITS[0] - .005, PITCH_LIMITS[1] + .005),
+                   np.clip(rpy[2], YAW_LIMITS[0] - .005, YAW_LIMITS[1] + .005)])
 
-def gaussian_kernel(sizex, sizey, stdx, stdy, dx, dy):
-  y, x = np.mgrid[-sizey:sizey+1, -sizex:sizex+1]
-  g = np.exp(-((x - dx)**2 / (2. * stdx**2) + (y - dy)**2 / (2. * stdy**2)))
-  return g / g.sum()
 
-def gaussian_kernel_1d(kernel):
-  #creates separable gaussian filter
-  u,s,v = np.linalg.svd(kernel)
-  x = u[:,0]*np.sqrt(s[0])
-  y = np.sqrt(s[0])*v[0,:]
-  return x, y
-
-def blur_image(img, kernel_x, kernel_y):
-  return cv2.sepFilter2D(img.astype(np.uint16), -1, kernel_x, kernel_y)
-
-def is_calibration_valid(vp):
-  return vp[0] > VP_VALIDITY_CORNERS[0,0] and vp[0] < VP_VALIDITY_CORNERS[1,0] and \
-         vp[1] > VP_VALIDITY_CORNERS[0,1] and vp[1] < VP_VALIDITY_CORNERS[1,1]
-
-class Calibrator(object):
+class Calibrator():
   def __init__(self, param_put=False):
     self.param_put = param_put
-    self.speed = 0
-    self.vp_cycles = 0
-    self.angle_offset = 0.
-    self.yaw_rate = 0.
-    self.l100_last_updated = 0
-    self.prev_orbs = None
-    self.kernel = gaussian_kernel(11, 11, 2.35, 2.35, 0, 0)
-    self.kernel_x, self.kernel_y = gaussian_kernel_1d(self.kernel)
 
-    self.vp = copy.copy(VP_INIT)
-    self.cal_status = Calibration.UNCALIBRATED
-    self.frame_counter = 0
-    self.params = Params()
-    calibration_params = self.params.get("CalibrationParams")
-    if calibration_params:
+    # Read saved calibration
+    calibration_params = Params().get("CalibrationParams")
+
+    rpy_init = RPY_INIT
+    valid_blocks = 0
+
+    if param_put and calibration_params:
       try:
         calibration_params = json.loads(calibration_params)
-        self.vp = np.array(calibration_params["vanishing_point"])
-        self.cal_status = Calibration.CALIBRATED if is_calibration_valid(self.vp) else Calibration.INVALID
-        self.vp_cycles = VP_CYCLES_NEEDED
-        self.frame_counter = CALIBRATION_CYCLES_NEEDED
+        rpy_init = calibration_params["calib_radians"]
+        valid_blocks = calibration_params['valid_blocks']
       except Exception:
         cloudlog.exception("CalibrationParams file found but error encountered")
+    self.reset(rpy_init, valid_blocks)
+    self.update_status()
 
-    self.vp_unfilt = self.vp
-    self.orb_last_updated = 0.
-    self.reset_grid()
-
-  def reset_grid(self):
-    if self.cal_status == Calibration.UNCALIBRATED:
-      # empty grid
-      self.grid = np.zeros((H+1, W+1), dtype=np.float)
+  def reset(self, rpy_init=RPY_INIT, valid_blocks=0, smooth_from=None):
+    if not np.isfinite(rpy_init).all():
+        self.rpy = copy.copy(RPY_INIT)
     else:
-      # gaussian grid, centered at vp
-      self.grid = gaussian_kernel(W/2., H/2., 16, 16, self.vp[0] - W/2., self.vp[1] - H/2.) * GRID_WEIGHT_INIT
-
-  def rescale_grid(self):
-    self.grid *= 0.9
-
-  def update(self, uvs, yaw_rate, speed):
-    if len(uvs) < 10 or \
-       abs(yaw_rate) > Filter.MAX_YAW_RATE or \
-       speed < Filter.MIN_SPEED:
-      return
-    rot_speeds = np.array([0.,0.,-yaw_rate])
-    uvs[:,1,:] = denormalize(correct_pts(normalize(uvs[:,1,:]), rot_speeds, self.dt))
-    # exclude tracks where:
-    # - pixel movement was less than 10 pixels
-    # - tracks are in the "hood region"
-    good_tracks = np.all([np.linalg.norm(uvs[:,1,:] - uvs[:,0,:], axis=1) > 10,
-                  uvs[:,0,1] < HOOD_HEIGHT,
-                  uvs[:,1,1] < HOOD_HEIGHT], axis = 0)
-    uvs = uvs[good_tracks]
-    if uvs.shape[0] > MAX_LINES:
-      uvs = uvs[np.random.choice(uvs.shape[0], MAX_LINES, replace=False), :]
-    lines = get_lines(uvs)
-
-    increment_grid_c(self.grid, lines, len(lines))
-    self.frame_counter += 1
-    if (self.frame_counter % FRAMES_NEEDED) == 0:
-      grid = blur_image(self.grid, self.kernel_x, self.kernel_y)
-      argmax_vp = np.unravel_index(np.argmax(grid), grid.shape)[::-1]
-      self.rescale_grid()
-      self.vp_unfilt = np.array(argmax_vp)
-      self.vp_cycles += 1
-      if (self.vp_cycles - VP_CYCLES_NEEDED) % 10 == 0:    # update file every 10
-        # skip rate_lim before writing the file to avoid writing a lagged vp
-        if self.cal_status != Calibration.CALIBRATED:
-          self.vp = self.vp_unfilt
-        if self.param_put:
-          cal_params = {"vanishing_point": list(self.vp), "angle_offset2": self.angle_offset}
-          self.params.put("CalibrationParams", json.dumps(cal_params))
-      return self.vp_unfilt
-
-  def parse_orb_features(self, log):
-    matches = np.array(log.orbFeatures.matches)
-    n = len(log.orbFeatures.matches)
-    t = float(log.orbFeatures.timestampLastEof)*1e-9
-    if t == 0 or n == 0:
-      return t, np.zeros((0,2,2))
-    orbs = denormalize(np.column_stack((log.orbFeatures.xs,
-                                        log.orbFeatures.ys)))
-    if self.prev_orbs is not None:
-      valid_matches = (matches > -1) & (matches < len(self.prev_orbs))
-      tracks = np.hstack((orbs[valid_matches], self.prev_orbs[matches[valid_matches]])).reshape((-1,2,2))
+      self.rpy = rpy_init
+    if not np.isfinite(valid_blocks) or valid_blocks < 0:
+        self.valid_blocks = 0
     else:
-      tracks = np.zeros((0,2,2))
-    self.prev_orbs = orbs
-    return t, tracks
+      self.valid_blocks = valid_blocks
+    self.rpys = np.tile(self.rpy, (INPUTS_WANTED, 1))
 
-  def update_vp(self):
-    # rate limit to not move VP too fast
-    self.vp = np.clip(self.vp_unfilt, self.vp - VP_RATE_LIM, self.vp + VP_RATE_LIM)
-    if self.vp_cycles < VP_CYCLES_NEEDED:
+    self.idx = 0
+    self.block_idx = 0
+    self.v_ego = 0
+
+    if smooth_from is None:
+      self.old_rpy = RPY_INIT
+      self.old_rpy_weight = 0.0
+    else:
+      self.old_rpy = smooth_from
+      self.old_rpy_weight = 1.0
+
+  def update_status(self):
+    if self.valid_blocks > 0:
+      max_rpy_calib = np.array(np.max(self.rpys[:self.valid_blocks], axis=0))
+      min_rpy_calib = np.array(np.min(self.rpys[:self.valid_blocks], axis=0))
+      self.calib_spread = np.abs(max_rpy_calib - min_rpy_calib)
+    else:
+      self.calib_spread = np.zeros(3)
+
+    if self.valid_blocks < INPUTS_NEEDED:
       self.cal_status = Calibration.UNCALIBRATED
+    elif is_calibration_valid(self.rpy):
+      self.cal_status = Calibration.CALIBRATED
     else:
-      self.cal_status = Calibration.CALIBRATED if is_calibration_valid(self.vp) else Calibration.INVALID
+      self.cal_status = Calibration.INVALID
 
-  def handle_orb_features(self, log):
-    self.update_vp()
-    self.time_orb, frame_raw = self.parse_orb_features(log)
-    self.dt = min(self.time_orb - self.orb_last_updated, 1.)
-    self.orb_last_updated = self.time_orb
-    if self.time_orb - self.l100_last_updated < 1:
-      return self.update(frame_raw, self.yaw_rate, self.speed)
+    # If spread is too high, assume mounting was changed and reset to last block.
+    # Make the transition smooth. Abrupt transistion are not good foor feedback loop through supercombo model.
+    if max(self.calib_spread) > MAX_ALLOWED_SPREAD and self.cal_status == Calibration.CALIBRATED:
+      self.reset(self.rpys[self.block_idx - 1], valid_blocks=INPUTS_NEEDED, smooth_from=self.rpy)
 
-  def handle_live100(self, log):
-    self.l100_last_updated = self.time_orb
-    self.speed = log.live100.vEgo
-    self.angle_offset = log.live100.angleOffset
-    self.yaw_rate = log.live100.curvature * self.speed
+    write_this_cycle = (self.idx == 0) and (self.block_idx % (INPUTS_WANTED//5) == 5)
+    if self.param_put and write_this_cycle:
+      # TODO: this should use the liveCalibration struct from cereal
+      cal_params = {"calib_radians": list(self.rpy),
+                    "valid_blocks": int(self.valid_blocks)}
+      put_nonblocking("CalibrationParams", json.dumps(cal_params).encode('utf8'))
 
-  def handle_debug(self):
-    grid_blurred = blur_image(self.grid, self.kernel_x, self.kernel_y)
-    grid_grey = np.clip(grid_blurred/(0.1 + np.max(grid_blurred))*255, 0, 255)
-    grid_color = np.repeat(grid_grey[:,:,np.newaxis], 3, axis=2)
-    grid_color[:,:,0] = 0
-    cv2.circle(grid_color, tuple(self.vp.astype(np.int64)), 2, (255, 255, 0), -1)
-    cv2.imshow("debug", grid_color.astype(np.uint8))
+  def handle_v_ego(self, v_ego):
+    self.v_ego = v_ego
 
-    cv2.waitKey(1)
+  def get_smooth_rpy(self):
+    if self.old_rpy_weight > 0:
+      return self.old_rpy_weight * self.old_rpy + (1.0 - self.old_rpy_weight) * self.rpy
+    else:
+      return self.rpy
 
-  def send_data(self, livecalibration):
-    calib = get_calib_from_vp(self.vp)
-    extrinsic_matrix = get_view_frame_from_road_frame(0, calib[1], calib[2], model_height)
-    ke = eon_intrinsics.dot(extrinsic_matrix)
-    warp_matrix = get_camera_frame_from_model_frame(ke)
-    warp_matrix_big = get_camera_frame_from_bigmodel_frame(ke)
+  def handle_cam_odom(self, trans, rot, trans_std, rot_std):
+    self.old_rpy_weight = min(0.0, self.old_rpy_weight - 1/SMOOTH_CYCLES)
 
-    cal_send = messaging.new_message()
-    cal_send.init('liveCalibration')
+    straight_and_fast = ((self.v_ego > MIN_SPEED_FILTER) and (trans[0] > MIN_SPEED_FILTER) and (abs(rot[2]) < MAX_YAW_RATE_FILTER))
+    certain_if_calib = ((np.arctan2(trans_std[1], trans[0]) < MAX_VEL_ANGLE_STD) or
+                        (self.valid_blocks < INPUTS_NEEDED))
+    if straight_and_fast and certain_if_calib:
+      observed_rpy = np.array([0,
+                               -np.arctan2(trans[2], trans[0]),
+                               np.arctan2(trans[1], trans[0])])
+      new_rpy = euler_from_rot(rot_from_euler(self.get_smooth_rpy()).dot(rot_from_euler(observed_rpy)))
+      new_rpy = sanity_clip(new_rpy)
+
+      self.rpys[self.block_idx] = (self.idx*self.rpys[self.block_idx] + (BLOCK_SIZE - self.idx) * new_rpy) / float(BLOCK_SIZE)
+      self.idx = (self.idx + 1) % BLOCK_SIZE
+      if self.idx == 0:
+        self.block_idx += 1
+        self.valid_blocks = max(self.block_idx, self.valid_blocks)
+        self.block_idx = self.block_idx % INPUTS_WANTED
+      if self.valid_blocks > 0:
+        self.rpy = np.mean(self.rpys[:self.valid_blocks], axis=0)
+
+
+      self.update_status()
+
+      return new_rpy
+    else:
+      return None
+
+  def send_data(self, pm):
+    smooth_rpy = self.get_smooth_rpy()
+    extrinsic_matrix = get_view_frame_from_road_frame(0, smooth_rpy[1], smooth_rpy[2], model_height)
+
+    cal_send = messaging.new_message('liveCalibration')
+    cal_send.liveCalibration.validBlocks = self.valid_blocks
     cal_send.liveCalibration.calStatus = self.cal_status
-    cal_send.liveCalibration.calPerc = min(self.frame_counter * 100 / CALIBRATION_CYCLES_NEEDED, 100)
-    cal_send.liveCalibration.warpMatrix2 = map(float, warp_matrix.flatten())
-    cal_send.liveCalibration.warpMatrixBig = map(float, warp_matrix_big.flatten())
-    cal_send.liveCalibration.extrinsicMatrix = map(float, extrinsic_matrix.flatten())
+    cal_send.liveCalibration.calPerc = min(100 * (self.valid_blocks * BLOCK_SIZE + self.idx) // (INPUTS_NEEDED * BLOCK_SIZE), 100)
+    cal_send.liveCalibration.extrinsicMatrix = [float(x) for x in extrinsic_matrix.flatten()]
+    cal_send.liveCalibration.rpyCalib = [float(x) for x in smooth_rpy]
+    cal_send.liveCalibration.rpyCalibSpread = [float(x) for x in self.calib_spread]
 
-    livecalibration.send(cal_send.to_bytes())
+    pm.send('liveCalibration', cal_send)
 
 
-def calibrationd_thread(gctx=None, addr="127.0.0.1"):
-  context = zmq.Context()
+def calibrationd_thread(sm=None, pm=None):
+  if sm is None:
+    sm = messaging.SubMaster(['cameraOdometry', 'carState'], poll=['cameraOdometry'])
 
-  live100 = messaging.sub_sock(context, service_list['live100'].port, addr=addr, conflate=True)
-  orbfeatures = messaging.sub_sock(context, service_list['orbFeatures'].port, addr=addr, conflate=True)
-  livecalibration = messaging.pub_sock(context, service_list['liveCalibration'].port)
+  if pm is None:
+    pm = messaging.PubMaster(['liveCalibration'])
 
-  calibrator = Calibrator(param_put = True)
+  calibrator = Calibrator(param_put=True)
 
-  # buffer with all the messages that still need to be input into the kalman
   while 1:
-    of = messaging.recv_one(orbfeatures)
-    l100 = messaging.recv_one_or_none(live100)
+    timeout = 0 if sm.frame == -1 else 100
+    sm.update(timeout)
 
-    new_vp = calibrator.handle_orb_features(of)
-    if DEBUG and new_vp is not None:
-      print 'got new vp', new_vp
-    if l100 is not None:
-      calibrator.handle_live100(l100)
-    if DEBUG:
-      calibrator.handle_debug()
+    if sm.updated['cameraOdometry']:
+      calibrator.handle_v_ego(sm['carState'].vEgo)
+      new_rpy = calibrator.handle_cam_odom(sm['cameraOdometry'].trans,
+                                           sm['cameraOdometry'].rot,
+                                           sm['cameraOdometry'].transStd,
+                                           sm['cameraOdometry'].rotStd)
 
-    calibrator.send_data(livecalibration)
+      if DEBUG and new_rpy is not None:
+        print('got new rpy', new_rpy)
+
+    # 4Hz driven by cameraOdometry
+    if sm.frame % 5 == 0:
+      calibrator.send_data(pm)
 
 
-def main(gctx=None, addr="127.0.0.1"):
-  calibrationd_thread(gctx, addr)
+def main(sm=None, pm=None):
+  calibrationd_thread(sm, pm)
+
 
 if __name__ == "__main__":
   main()
-

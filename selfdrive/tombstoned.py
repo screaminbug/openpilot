@@ -1,8 +1,6 @@
+#!/usr/bin/env python3
 import os
-import re
 import time
-import uuid
-import datetime
 
 from raven import Client
 from raven.transport.http import HTTPTransport
@@ -10,76 +8,86 @@ from raven.transport.http import HTTPTransport
 from selfdrive.version import version, dirty
 from selfdrive.swaglog import cloudlog
 
+MAX_SIZE = 100000 * 10  # Normal size is 40-100k, allow up to 1M
+
+
 def get_tombstones():
-  return [("/data/tombstones/"+fn, int(os.stat("/data/tombstones/"+fn).st_ctime) )
-          for fn in os.listdir("/data/tombstones") if fn.startswith("tombstone")]
+  """Returns list of (filename, ctime) for all tombstones in /data/tombstones
+  and apport crashlogs in /var/crash"""
+  files = []
+  for folder in ["/data/tombstones/", "/var/crash/"]:
+    if os.path.exists(folder):
+      with os.scandir(folder) as d:
+
+        # Loop over first 1000 directory entries
+        for _, f in zip(range(1000), d):
+          if f.name.startswith("tombstone") or f.name.endswith(".crash"):
+            files.append((f.path, int(f.stat().st_ctime)))
+  return files
+
 
 def report_tombstone(fn, client):
-  mtime = os.path.getmtime(fn)
-  with open(fn, "r") as f:
-    dat = f.read()
+  f_size = os.path.getsize(fn)
+  if f_size > MAX_SIZE:
+    cloudlog.error(f"Tombstone {fn} too big, {f_size}. Skipping...")
+    return
 
-  # see system/core/debuggerd/tombstone.cpp
-  parsed = re.match(r"[* ]*\n"
-                    r"(?P<header>CM Version:[\s\S]*?ABI:.*\n)"
-                    r"(?P<thread>pid:.*\n)"
-                    r"(?P<signal>signal.*\n)?"
-                    r"(?P<abort>Abort.*\n)?"
-                    r"(?P<registers>\s+x0[\s\S]*?\n)\n"
-                    r"(?:backtrace:\n"
-                      r"(?P<backtrace>[\s\S]*?\n)\n"
-                      r"stack:\n"
-                      r"(?P<stack>[\s\S]*?\n)\n"
-                    r")?", dat)
+  with open(fn, encoding='ISO-8859-1') as f:
+    contents = f.read()
 
-  logtail = re.search(r"--------- tail end of.*\n([\s\S]*?\n)---", dat)
-  logtail = logtail and logtail.group(1)
+  # Get summary for sentry title
+  if fn.endswith(".crash"):
+    lines = contents.split('\n')
+    message = lines[6]
 
-  if parsed:
-    parsedict = parsed.groupdict()
-    message = parsedict.get('thread') or ''
-    message += parsedict.get('signal') or  ''
-    message += parsedict.get('abort') or ''
+    status_idx = contents.find('ProcStatus')
+    if status_idx >= 0:
+      lines = contents[status_idx:].split('\n')
+      message += " " + lines[1]
   else:
-    parsedict = {}
-    message = fn+"\n"+dat[:1024]
+    message = " ".join(contents.split('\n')[5:7])
 
-  client.send(
-    event_id=uuid.uuid4().hex,
-    timestamp=datetime.datetime.utcfromtimestamp(mtime),
-    logger='tombstoned',
-    platform='other',
+    # Cut off pid/tid, since that varies per run
+    name_idx = message.find('name')
+    if name_idx >= 0:
+      message = message[name_idx:]
+
+    # Cut off fault addr
+    fault_idx = message.find(', fault addr')
+    if fault_idx >= 0:
+      message = message[:fault_idx]
+
+
+  cloudlog.error({'tombstone': message})
+  client.captureMessage(
+    message=message,
     sdk={'name': 'tombstoned', 'version': '0'},
     extra={
       'tombstone_fn': fn,
-      'header': parsedict.get('header'),
-      'registers': parsedict.get('registers'),
-      'backtrace': parsedict.get('backtrace'),
-      'logtail': logtail,
-      'version': version,
-      'dirty': not bool(os.environ.get('CLEAN')),
+      'tombstone': contents
     },
-    user={'id': os.environ.get('DONGLE_ID')},
-    message=message,
   )
-  cloudlog.error({"tombstone": message})
 
 
-def main(gctx):
+def main():
   initial_tombstones = set(get_tombstones())
-
   client = Client('https://d3b175702f62402c91ade04d1c547e68:b20d68c813c74f63a7cdf9c4039d8f56@sentry.io/157615',
-                  install_sys_hook=False, transport=HTTPTransport, release=version, tags={'dirty': dirty})
+                  install_sys_hook=False, transport=HTTPTransport, release=version, tags={'dirty': dirty}, string_max_length=10000)
 
+  client.user_context({'id': os.environ.get('DONGLE_ID')})
   while True:
     now_tombstones = set(get_tombstones())
 
-    for fn, ctime in (now_tombstones - initial_tombstones):
-      cloudlog.info("reporting new tombstone %s", fn)
-      report_tombstone(fn, client)
+    for fn, _ in (now_tombstones - initial_tombstones):
+      try:
+        cloudlog.info(f"reporting new tombstone {fn}")
+        report_tombstone(fn, client)
+      except Exception:
+        cloudlog.exception(f"Error reporting tombstone {fn}")
 
     initial_tombstones = now_tombstones
     time.sleep(5)
 
+
 if __name__ == "__main__":
-  main(None)
+  main()
