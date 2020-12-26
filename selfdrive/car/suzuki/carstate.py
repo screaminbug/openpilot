@@ -1,5 +1,4 @@
-from selfdrive.can.parser import CANParser
-from selfdrive.config import Conversions as CV
+from opendbc.can.parser import CANParser
 from selfdrive.car.ford.values import DBC
 from common.kalman.simple_kalman import KF1D
 import numpy as np
