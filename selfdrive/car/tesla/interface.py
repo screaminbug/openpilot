@@ -6,7 +6,7 @@ from cereal import car, log
 from common.numpy_fast import clip, interp
 from common.realtime import sec_since_boot
 from selfdrive.config import Conversions as CV
-from selfdrive.controls.lib.drive_helpers import create_event, EventTypes as ET, get_events
+# from selfdrive.controls.lib.drive_helpers import create_event, EventTypes as ET, get_events
 from selfdrive.controls.lib.vehicle_model import VehicleModel
 from selfdrive.car.tesla.carstate import CarState, get_can_parser, get_epas_parser
 from selfdrive.car.tesla.values import CruiseButtons, CM, BP, AH, CAR
@@ -291,98 +291,98 @@ class CarInterface(object):
     # events
     # TODO: I don't like the way capnp does enums
     # These strings aren't checked at compile time
-    events = []
-    if not self.CS.can_valid:
-      self.can_invalid_count += 1
-      if self.can_invalid_count >= 5:
-        events.append(create_event('commIssue', [ET.NO_ENTRY, ET.IMMEDIATE_DISABLE]))
-    else:
-      self.can_invalid_count = 0
-    if self.CS.steer_error:
-      if self.CS.cstm_btns.get_button_status("steer") == 0:
-        events.append(create_event('steerUnavailable', [ET.NO_ENTRY, ET.WARNING]))
-    elif self.CS.steer_warning:
-      if self.CS.cstm_btns.get_button_status("steer") == 0:
-         events.append(create_event('steerTempUnavailable', [ET.NO_ENTRY, ET.IMMEDIATE_DISABLE]))
-    if self.CS.brake_error:
-      events.append(create_event('brakeUnavailable', [ET.NO_ENTRY, ET.IMMEDIATE_DISABLE, ET.PERMANENT]))
-    if not ret.gearShifter == 'drive':
-      events.append(create_event('wrongGear', [ET.NO_ENTRY, ET.SOFT_DISABLE]))
-    if ret.doorOpen:
-      events.append(create_event('doorOpen', [ET.NO_ENTRY, ET.SOFT_DISABLE]))
-    if ret.seatbeltUnlatched:
-      events.append(create_event('seatbeltNotLatched', [ET.NO_ENTRY, ET.SOFT_DISABLE]))
-    if self.CS.esp_disabled:
-      events.append(create_event('espDisabled', [ET.NO_ENTRY, ET.SOFT_DISABLE]))
-    if not self.CS.main_on:
-      events.append(create_event('wrongCarMode', [ET.NO_ENTRY, ET.USER_DISABLE]))
-    if ret.gearShifter == 'reverse':
-      events.append(create_event('reverseGear', [ET.NO_ENTRY, ET.IMMEDIATE_DISABLE]))
-    if self.CS.brake_hold:
-      events.append(create_event('brakeHold', [ET.NO_ENTRY, ET.USER_DISABLE]))
-    if self.CS.park_brake:
-      events.append(create_event('parkBrake', [ET.NO_ENTRY, ET.USER_DISABLE]))
+#     events = []
+#     if not self.CS.can_valid:
+#       self.can_invalid_count += 1
+#       if self.can_invalid_count >= 5:
+#         events.append(create_event('commIssue', [ET.NO_ENTRY, ET.IMMEDIATE_DISABLE]))
+#     else:
+#       self.can_invalid_count = 0
+#     if self.CS.steer_error:
+#       if self.CS.cstm_btns.get_button_status("steer") == 0:
+#         events.append(create_event('steerUnavailable', [ET.NO_ENTRY, ET.WARNING]))
+#     elif self.CS.steer_warning:
+#       if self.CS.cstm_btns.get_button_status("steer") == 0:
+#          events.append(create_event('steerTempUnavailable', [ET.NO_ENTRY, ET.IMMEDIATE_DISABLE]))
+#     if self.CS.brake_error:
+#       events.append(create_event('brakeUnavailable', [ET.NO_ENTRY, ET.IMMEDIATE_DISABLE, ET.PERMANENT]))
+#     if not ret.gearShifter == 'drive':
+#       events.append(create_event('wrongGear', [ET.NO_ENTRY, ET.SOFT_DISABLE]))
+#     if ret.doorOpen:
+#       events.append(create_event('doorOpen', [ET.NO_ENTRY, ET.SOFT_DISABLE]))
+#     if ret.seatbeltUnlatched:
+#       events.append(create_event('seatbeltNotLatched', [ET.NO_ENTRY, ET.SOFT_DISABLE]))
+#     if self.CS.esp_disabled:
+#       events.append(create_event('espDisabled', [ET.NO_ENTRY, ET.SOFT_DISABLE]))
+#     if not self.CS.main_on:
+#       events.append(create_event('wrongCarMode', [ET.NO_ENTRY, ET.USER_DISABLE]))
+#     if ret.gearShifter == 'reverse':
+#       events.append(create_event('reverseGear', [ET.NO_ENTRY, ET.IMMEDIATE_DISABLE]))
+#     if self.CS.brake_hold:
+#       events.append(create_event('brakeHold', [ET.NO_ENTRY, ET.USER_DISABLE]))
+#     if self.CS.park_brake:
+#       events.append(create_event('parkBrake', [ET.NO_ENTRY, ET.USER_DISABLE]))
+#
+#
+#     if self.CP.enableCruise and ret.vEgo < self.CP.minEnableSpeed:
+#       events.append(create_event('speedTooLow', [ET.NO_ENTRY]))
+#
+# # Standard OP method to disengage:
+# # disable on pedals rising edge or when brake is pressed and speed isn't zero
+# #    if (ret.gasPressed and not self.gas_pressed_prev) or \
+# #       (ret.brakePressed and (not self.brake_pressed_prev or ret.vEgo > 0.001)):
+# #      events.append(create_event('steerTempUnavailable', [ET.NO_ENTRY, ET.IMMEDIATE_DISABLE]))
+#
+#     if (self.CS.cstm_btns.get_button_status("brake")>0):
+#       if ((self.CS.brake_pressed !=0) != self.brake_pressed_prev): #break not canceling when pressed
+#         self.CS.cstm_btns.set_button_status("brake", 2 if self.CS.brake_pressed != 0 else 1)
+#     else:
+#       if ret.brakePressed:
+#         events.append(create_event('pedalPressed', [ET.NO_ENTRY, ET.USER_DISABLE]))
+#     if ret.gasPressed:
+#       events.append(create_event('pedalPressed', [ET.PRE_ENABLE]))
+#
+#     # it can happen that car cruise disables while comma system is enabled: need to
+#     # keep braking if needed or if the speed is very low
+#     if self.CP.enableCruise and not ret.cruiseState.enabled and c.actuators.brake <= 0.:
+#       # non loud alert if cruise disbales below 25mph as expected (+ a little margin)
+#       if ret.vEgo < self.CP.minEnableSpeed + 2.:
+#         events.append(create_event('speedTooLow', [ET.IMMEDIATE_DISABLE]))
+#       else:
+#         events.append(create_event("cruiseDisabled", [ET.IMMEDIATE_DISABLE]))
+#     if self.CS.CP.minEnableSpeed > 0 and ret.vEgo < 0.001:
+#       events.append(create_event('manualRestart', [ET.WARNING]))
+#
+#     cur_time = sec_since_boot()
+#     enable_pressed = False
+#     # handle button presses
+#     for b in ret.buttonEvents:
+#
+#       # do enable on both accel and decel buttons
+#       if b.type == "altButton3" and not b.pressed:
+#         print("enabled pressed at", cur_time)
+#         self.last_enable_pressed = cur_time
+#         enable_pressed = True
+#
+#       # do disable on button down
+#       if b.type == "cancel" and b.pressed:
+#         events.append(create_event('buttonCancel', [ET.USER_DISABLE]))
+#
+#     if self.CP.enableCruise:
+#       # KEEP THIS EVENT LAST! send enable event if button is pressed and there are
+#       # NO_ENTRY events, so controlsd will display alerts. Also not send enable events
+#       # too close in time, so a no_entry will not be followed by another one.
+#       # TODO: button press should be the only thing that triggers enble
+#       if ((cur_time - self.last_enable_pressed) < 0.2 and
+#           (cur_time - self.last_enable_sent) > 0.2 and
+#           ret.cruiseState.enabled) or \
+#          (enable_pressed and get_events(events, [ET.NO_ENTRY])):
+#         events.append(create_event('buttonEnable', [ET.ENABLE]))
+#         self.last_enable_sent = cur_time
+#     elif enable_pressed:
+#       events.append(create_event('buttonEnable', [ET.ENABLE]))
 
-
-    if self.CP.enableCruise and ret.vEgo < self.CP.minEnableSpeed:
-      events.append(create_event('speedTooLow', [ET.NO_ENTRY]))
-
-# Standard OP method to disengage:
-# disable on pedals rising edge or when brake is pressed and speed isn't zero
-#    if (ret.gasPressed and not self.gas_pressed_prev) or \
-#       (ret.brakePressed and (not self.brake_pressed_prev or ret.vEgo > 0.001)):
-#      events.append(create_event('steerTempUnavailable', [ET.NO_ENTRY, ET.IMMEDIATE_DISABLE]))
-
-    if (self.CS.cstm_btns.get_button_status("brake")>0):
-      if ((self.CS.brake_pressed !=0) != self.brake_pressed_prev): #break not canceling when pressed
-        self.CS.cstm_btns.set_button_status("brake", 2 if self.CS.brake_pressed != 0 else 1)
-    else:
-      if ret.brakePressed:
-        events.append(create_event('pedalPressed', [ET.NO_ENTRY, ET.USER_DISABLE]))
-    if ret.gasPressed:
-      events.append(create_event('pedalPressed', [ET.PRE_ENABLE]))
-
-    # it can happen that car cruise disables while comma system is enabled: need to
-    # keep braking if needed or if the speed is very low
-    if self.CP.enableCruise and not ret.cruiseState.enabled and c.actuators.brake <= 0.:
-      # non loud alert if cruise disbales below 25mph as expected (+ a little margin)
-      if ret.vEgo < self.CP.minEnableSpeed + 2.:
-        events.append(create_event('speedTooLow', [ET.IMMEDIATE_DISABLE]))
-      else:
-        events.append(create_event("cruiseDisabled", [ET.IMMEDIATE_DISABLE]))
-    if self.CS.CP.minEnableSpeed > 0 and ret.vEgo < 0.001:
-      events.append(create_event('manualRestart', [ET.WARNING]))
-
-    cur_time = sec_since_boot()
-    enable_pressed = False
-    # handle button presses
-    for b in ret.buttonEvents:
-
-      # do enable on both accel and decel buttons
-      if b.type == "altButton3" and not b.pressed:
-        print("enabled pressed at", cur_time)
-        self.last_enable_pressed = cur_time
-        enable_pressed = True
-
-      # do disable on button down
-      if b.type == "cancel" and b.pressed:
-        events.append(create_event('buttonCancel', [ET.USER_DISABLE]))
-
-    if self.CP.enableCruise:
-      # KEEP THIS EVENT LAST! send enable event if button is pressed and there are
-      # NO_ENTRY events, so controlsd will display alerts. Also not send enable events
-      # too close in time, so a no_entry will not be followed by another one.
-      # TODO: button press should be the only thing that triggers enble
-      if ((cur_time - self.last_enable_pressed) < 0.2 and
-          (cur_time - self.last_enable_sent) > 0.2 and
-          ret.cruiseState.enabled) or \
-         (enable_pressed and get_events(events, [ET.NO_ENTRY])):
-        events.append(create_event('buttonEnable', [ET.ENABLE]))
-        self.last_enable_sent = cur_time
-    elif enable_pressed:
-      events.append(create_event('buttonEnable', [ET.ENABLE]))
-
-    ret.events = events
+    # ret.events = events
     ret.canMonoTimes = canMonoTimes
 
     # update previous brake/gas pressed
