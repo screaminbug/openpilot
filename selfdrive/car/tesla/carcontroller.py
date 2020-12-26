@@ -1,28 +1,22 @@
 from __future__ import print_function
-import os
-import subprocess
-from  threading import Thread
-import traceback
-import shlex
+
 from collections import namedtuple
-from selfdrive.boardd.boardd import can_list_to_can_capnp
-from selfdrive.controls.lib.drive_helpers import rate_limit
-from common.numpy_fast import clip, interp
-import numpy as np
-import math as mth
-from common.realtime import sec_since_boot
-from selfdrive.car.tesla import teslacan
-from selfdrive.car.tesla.values import AH, CruiseButtons, CAR, CM
-from selfdrive.can.packer import CANPacker
-from selfdrive.config import Conversions as CV
-from selfdrive.car.modules.ALCA_module import ALCAController
-from selfdrive.car.tesla.ACC_module import ACCController
-from selfdrive.car.tesla.PCC_module import PCCController
-from selfdrive.car.tesla.HSO_module import HSOController
-import zmq
+
 import selfdrive.messaging as messaging
+import zmq
 from selfdrive.services import service_list
+
 from cereal import ui
+from common.numpy_fast import clip, interp
+from opendbc.can.packer import CANPacker
+from selfdrive.boardd.boardd import can_list_to_can_capnp
+from selfdrive.car.modules.ALCA_module import ALCAController
+from selfdrive.car.tesla import teslacan
+from selfdrive.car.tesla.ACC_module import ACCController
+from selfdrive.car.tesla.HSO_module import HSOController
+from selfdrive.car.tesla.PCC_module import PCCController
+from selfdrive.car.tesla.values import AH, CM
+from selfdrive.config import Conversions as CV
 
 # Steer angle limits
 ANGLE_MAX_BP = [0., 27., 36.]
