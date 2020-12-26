@@ -1,4 +1,5 @@
 from __future__ import print_function
+from __future__ import print_function
 from selfdrive.services import service_list
 from selfdrive.car.tesla.values import AH, CruiseButtons, CruiseState, CAR
 from selfdrive.config import Conversions as CV
@@ -331,7 +332,7 @@ class ACCController(object):
         ratio, lead_dist_m, available_speed_kph, lead_car.vRel * CV.MS_TO_KPH, CS.angle_steers))
       self.last_update_time = current_time_ms
       if msg != None:
-        print "ACC: " + msg
+        print("ACC: " + msg)
     return button
     
   def _should_autoengage_cc(self, CS, lead_car=None):
