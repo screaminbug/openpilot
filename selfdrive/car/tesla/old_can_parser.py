@@ -1,3 +1,4 @@
+from __future__ import print_function
 import os
 import opendbc
 from collections import defaultdict
@@ -77,7 +78,7 @@ class CANParser(object):
           msg_vl = fix(ck_portion, msg)
           # compare recalculated vs received checksum
           if msg_vl != cdat:
-            print "CHECKSUM FAIL: " + hex(msg)
+            print("CHECKSUM FAIL: " + hex(msg))
             self.ck[msg] = False
             self.ok[msg] = False
         # counter check

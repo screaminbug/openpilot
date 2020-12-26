@@ -1,6 +1,7 @@
 #!/usr/bin/env python
-import numpy as np
-from common.kalman.simple_kalman import KF1D
+from __future__ import print_function
+from __future__ import print_function
+from __future__ import print_function
 from cereal import car, log
 from common.numpy_fast import clip, interp
 from common.realtime import sec_since_boot
@@ -95,8 +96,8 @@ class CarInterface(object):
 
     ret.enableCamera = True
     ret.enableGasInterceptor = False #keep this False for now
-    print "ECU Camera Simulated: ", ret.enableCamera
-    print "ECU Gas Interceptor: ", ret.enableGasInterceptor
+    print("ECU Camera Simulated: ", ret.enableCamera)
+    print("ECU Gas Interceptor: ", ret.enableGasInterceptor)
 
     ret.enableCruise = not ret.enableGasInterceptor
 
@@ -359,7 +360,7 @@ class CarInterface(object):
 
       # do enable on both accel and decel buttons
       if b.type == "altButton3" and not b.pressed:
-        print "enabled pressed at", cur_time
+        print("enabled pressed at", cur_time)
         self.last_enable_pressed = cur_time
         enable_pressed = True
 

@@ -1,3 +1,7 @@
+from __future__ import print_function
+from __future__ import print_function
+from __future__ import print_function
+from __future__ import print_function
 from selfdrive.car.tesla import teslacan
 from selfdrive.car.tesla.longcontrol_tesla import LongControl, LongCtrlState, STARTING_TARGET_SPEED
 from selfdrive.car.tesla import teslacan
@@ -240,13 +244,13 @@ class PCCController(object):
     if CS.pedal_interceptor_available and not CS.cstm_btns.get_button_status("pedal"):
       # pedal hardware, enable button
       CS.cstm_btns.set_button_status("pedal", 1)
-      print "enabling pedal"
+      print("enabling pedal")
     elif not CS.pedal_interceptor_available:
       if CS.cstm_btns.get_button_status("pedal"):
         # no pedal hardware, disable button
         CS.cstm_btns.set_button_status("pedal", 0)
-        print "disabling pedal"
-      print "Pedal unavailable."
+        print("disabling pedal")
+      print("Pedal unavailable.")
       return
     
     # check if we had error before
@@ -412,7 +416,7 @@ class PCCController(object):
         #print "Output GB Follow:", output_gb
       else:
         self.LoC.reset(CS.v_ego)
-        print "PID reset"
+        print("PID reset")
         output_gb = 0.
         starting = self.LoC.long_control_state == LongCtrlState.starting
         a_ego = min(CS.a_ego, 0.0)
