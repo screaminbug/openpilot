@@ -1,8 +1,6 @@
 from selfdrive.boardd.boardd import can_list_to_can_capnp
-from selfdrive.car import apply_std_steer_torque_limits
-from common.numpy_fast import clip
 from selfdrive.car.suzuki import suzukican
-from selfdrive.can.packer import CANPacker
+from opendbc.can.packer import CANPacker
 from selfdrive.car.suzuki.values import CAR, DBC
 
 class CarControllerParams:
