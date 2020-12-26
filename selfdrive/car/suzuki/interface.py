@@ -1,10 +1,8 @@
 #!/usr/bin/env python
-import zmq
+# import zmq
 from cereal import car, log
 from selfdrive.config import Conversions as CV
-from selfdrive.services import service_list
 from selfdrive.swaglog import cloudlog
-import selfdrive.messaging as messaging
 from selfdrive.car.suzuki.carstate import CarState, get_can_parser
 
 try:
@@ -30,15 +28,15 @@ class CarInterface(object):
     self.CS = CarState(CP)
 
     cloudlog.debug("Using Mock Car Interface")
-    context = zmq.Context()
+    # context = zmq.Context()
     # sending if read only is False
     if sendcan is not None:
       self.sendcan = sendcan
       self.CC = CarController(self.carParams.dbc_name, CP.enableCamera, self.VM)
 
     # TODO: subscribe to phone sensor
-    self.sensor = messaging.sub_sock(context, service_list['sensorEvents'].port)
-    self.gps = messaging.sub_sock(context, service_list['gpsLocation'].port)
+    # self.sensor = messaging.sub_sock(context, service_list['sensorEvents'].port)
+    # self.gps = messaging.sub_sock(context, service_list['gpsLocation'].port)
 
     self.speed = 0.
     self.prev_speed = 0.
@@ -97,16 +95,16 @@ class CarInterface(object):
     self.CS.update(self.carParams)
 
     # get basic data from phone and gps since CAN isn't connected
-    sensors = messaging.recv_sock(self.sensor)
-    if sensors is not None:
-      for sensor in sensors.sensorEvents:
-        if sensor.type == 4:  # gyro
-          self.yaw_rate_meas = -sensor.gyro.v[0]
-
-    gps = messaging.recv_sock(self.gps)
-    if gps is not None:
-      self.prev_speed = self.speed
-      self.speed = gps.gpsLocation.speed
+    # sensors = messaging.recv_sock(self.sensor)
+    # if sensors is not None:
+    #   for sensor in sensors.sensorEvents:
+    #     if sensor.type == 4:  # gyro
+    #       self.yaw_rate_meas = -sensor.gyro.v[0]
+    #
+    # gps = messaging.recv_sock(self.gps)
+    # if gps is not None:
+    #   self.prev_speed = self.speed
+    #   self.speed = gps.gpsLocation.speed
 
     # create message
     ret = car.CarState.new_message()
